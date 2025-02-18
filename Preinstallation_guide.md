@@ -19,7 +19,7 @@ sudo apt-get install -y python3 python3-pip
 
 
 
-🔹 Easy Installation via Script:
+🔹 Easy Installation:
 Run the following script to automate the installation process.This script detects the OS and installs Docker, AWS CLI, and Python accordingly.
 ***********************************************************************************************************************************************
 #!/bin/bash
