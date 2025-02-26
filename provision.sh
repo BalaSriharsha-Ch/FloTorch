@@ -188,7 +188,7 @@ build_and_push_images() {
         exit 1
     fi
     
-    if ! docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-costcompute-"$suffix":latest -f cost_handler/Dockerfile --push . 2>/dev/null; then
+    if ! docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-costcompute-"$suffix":latest -f cost_handler/Dockerfile --push . 2>/dev/null; then
         echo "Error: Failed to build/push cost compute image"
         exit 1
     fi
