@@ -159,6 +159,8 @@ Resources:
 
   DataBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       BucketName: !Sub "flotorch-data-${TableSuffix}"
       VersioningConfiguration:
@@ -285,6 +287,79 @@ Resources:
     Properties:
       ServiceToken: !GetAtt CopyBedrockLimitsFunction.Arn
       TargetBucket: !Ref DataBucket
+
+  EmptyS3BucketFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt EmptyS3BucketRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      s3 = boto3.resource('s3')
+                      bucket = s3.Bucket(bucket_name)
+                      bucket.objects.all().delete()
+                      bucket.object_versions.all().delete()
+                      logger.info(f"Successfully emptied bucket {bucket_name}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+      Runtime: python3.9
+      Timeout: 300
+      MemorySize: 128
+      Tags:
+        - Key: ClientName
+          Value: !Ref ClientName
+        - Key: CreatedBy
+          Value: !Ref CreatedBy
+        - Key: ProjectName
+          Value: !Ref ProjectName
+
+  EmptyS3BucketRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EmptyS3BucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:GetObjectVersion
+                Resource:
+                  - !Sub "arn:aws:s3:::${DataBucket}"
+                  - !Sub "arn:aws:s3:::${DataBucket}/*"
+
+  EmptyS3BucketCustomResource:
+    Type: Custom::EmptyS3Bucket
+    DependsOn: DataBucket
+    Properties:
+      ServiceToken: !GetAtt EmptyS3BucketFunction.Arn
+      BucketName: !Ref DataBucket
 
 Outputs:
   ExecutionTableName:
