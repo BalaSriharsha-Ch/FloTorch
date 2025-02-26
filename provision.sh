@@ -169,11 +169,11 @@ build_and_push_images() {
 
     echo "Building and pushing Docker images..."
     local docker_commands=(
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.\"$region\".amazonaws.com/flotorch-app-\"$suffix\":latest -f app/Dockerfile --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.\"$region\".amazonaws.com/flotorch-indexing-\"$suffix\":latest -f indexing/fargate_indexing.Dockerfile --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.\"$region\".amazonaws.com/flotorch-retriever-\"$suffix\":latest -f retriever/fargate_retriever.Dockerfile --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.\"$region\".amazonaws.com/flotorch-evaluation-\"$suffix\":latest -f evaluation/fargate_evaluation.Dockerfile --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.\"$region\".amazonaws.com/flotorch-runtime-\"$suffix\":latest -f opensearch/opensearch.Dockerfile --push ."
+        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-app-$suffix:latest -f app/Dockerfile --push ."
+        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-indexing-$suffix:latest -f indexing/fargate_indexing.Dockerfile --push ."
+        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-retriever-$suffix:latest -f retriever/fargate_retriever.Dockerfile --push ."
+        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-evaluation-$suffix:latest -f evaluation/fargate_evaluation.Dockerfile --push ."
+        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-runtime-$suffix:latest -f opensearch/opensearch.Dockerfile --push ."
     )
     
     for cmd in "${docker_commands[@]}"; do
@@ -188,7 +188,7 @@ build_and_push_images() {
         exit 1
     fi
     
-    if ! docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-costcompute-"$suffix":latest -f cost_handler/Dockerfile --push . 2>/dev/null; then
+    if ! docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-costcompute-$suffix:latest -f cost_handler/Dockerfile --push . 2>/dev/null; then
         echo "Error: Failed to build/push cost compute image"
         exit 1
     fi
