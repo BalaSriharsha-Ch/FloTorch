@@ -523,7 +523,7 @@ if [ "$PREREQUISITES_MET" = "no" ]; then
 fi
 
 echo -e "\nStarting CloudFormation deployment..."
-if ! aws cloudformation create-stack \
+aws cloudformation create-stack \
     --stack-name "$PROJECT_NAME" \
     --template-url "https://flotorch-public.s3.us-east-1.amazonaws.com/${VERSION}/templates/master-template.yaml" \
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
@@ -537,9 +537,6 @@ if ! aws cloudformation create-stack \
         ParameterKey=ClientName,ParameterValue="$CLIENT_NAME" \
         ParameterKey=OpenSearchAdminUser,ParameterValue="$OPENSEARCH_USER" \
         ParameterKey=OpenSearchAdminPassword,ParameterValue="$OPENSEARCH_PASSWORD" \
-        ParameterKey=NginxAuthPassword,ParameterValue="$NGINX_PASSWORD" 2>/dev/null; then
-    echo "Error: Failed to initiate CloudFormation deployment"
-    exit 1
-fi
+        ParameterKey=NginxAuthPassword,ParameterValue="$NGINX_PASSWORD"
 
 echo -e "\nDeployment initiated. Check AWS CloudFormation console for progress."
