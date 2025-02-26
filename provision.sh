@@ -183,15 +183,12 @@ update_cfn_stack() {
     fi
 
     echo "Updating CloudFormation stack '${stack_name}'..."
-    if ! aws cloudformation update-stack \
+    aws cloudformation update-stack \
         --stack-name "$stack_name" \
         --template-url "https://flotorch-public.s3.us-east-1.amazonaws.com/${version}/templates/master-template.yaml" \
         --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
         --disable-rollback \
-        --region "$region" 2>/dev/null; then
-        echo "Error: Failed to update CloudFormation stack"
-        exit 1
-    fi
+        --region "$region"
     
     echo "Stack update initiated successfully. Please check AWS Console for status."
 }
