@@ -133,70 +133,40 @@ list_environments() {
 build_and_push_images() {
     local suffix=$1
     local region=$2
-    
-    if [ -z "$suffix" ] || [ -z "$region" ]; then
-        echo "Error: Missing required parameters for building images"
-        exit 1
-    fi
-    
+
     echo "Building and pushing Docker images for environment ${suffix}..."
 
-    local account_id
-    if ! account_id=$(aws sts get-caller-identity --query Account --output text 2>/dev/null); then
-        echo "Error: Failed to get AWS account ID"
-        exit 1
-    fi
+    # Get AWS account ID
+    local account_id=$(aws sts get-caller-identity --query Account --output text)
 
-    if ! aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin ${account_id}.dkr.ecr."$region".amazonaws.com 2>/dev/null; then
-        echo "Error: Failed to login to ECR"
-        exit 1
-    fi
+    # Login to ECR
+    aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin ${account_id}.dkr.ecr."$region".amazonaws.com
 
+    # Create repositories if they don't exist
     echo "Ensuring ECR repositories exist..."
     local repos=("flotorch-app" "flotorch-indexing" "flotorch-retriever" "flotorch-evaluation" "flotorch-runtime" "flotorch-costcompute")
     for repo in "${repos[@]}"; do
         local repo_name="${repo}-${suffix}"
         if ! aws ecr describe-repositories --repository-names "$repo_name" --region "$region" >/dev/null 2>&1; then
             echo "Creating repository: $repo_name"
-            if ! aws ecr create-repository --repository-name "$repo_name" --region "$region" --image-scanning-configuration scanOnPush=true 2>/dev/null; then
-                echo "Error: Failed to create ECR repository $repo_name"
-                exit 1
-            fi
+            aws ecr create-repository --repository-name "$repo_name" --region "$region" --image-scanning-configuration scanOnPush=true
         else
             echo "Repository $repo_name already exists"
         fi
     done
 
+    # Build and push Docker images
     echo "Building and pushing Docker images..."
-    local docker_commands=(
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-app-$suffix:latest -f app/Dockerfile --progress=plain --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-indexing-$suffix:latest -f indexing/fargate_indexing.Dockerfile --progress=plain --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-retriever-$suffix:latest -f retriever/fargate_retriever.Dockerfile --progress=plain --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-evaluation-$suffix:latest -f evaluation/fargate_evaluation.Dockerfile --progress=plain --push ."
-        "build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-runtime-$suffix:latest -f opensearch/opensearch.Dockerfile --progress=plain --push ."
-    )
-    
-    for cmd in "${docker_commands[@]}"; do
-        if ! docker $cmd; then
-            echo "Error: Failed to build/push Docker image: $cmd"
-            exit 1
-        fi
-    done
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-app-"$suffix":latest -f app/Dockerfile --push .
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-indexing-"$suffix":latest -f indexing/fargate_indexing.Dockerfile --push .
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-retriever-"$suffix":latest -f retriever/fargate_retriever.Dockerfile --push .
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-evaluation-"$suffix":latest -f evaluation/fargate_evaluation.Dockerfile --push .
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-runtime-"$suffix":latest -f opensearch/opensearch.Dockerfile --push .
 
-    if ! cd lambda_handlers; then
-        echo "Error: Failed to change to lambda_handlers directory"
-        exit 1
-    fi
-    
-    if ! docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.$region.amazonaws.com/flotorch-costcompute-$suffix:latest -f cost_handler/Dockerfile --progress=plain --push .; then
-        echo "Error: Failed to build/push cost compute image"
-        exit 1
-    fi
-    
-    if ! cd ..; then
-        echo "Error: Failed to return to parent directory"
-        exit 1
-    fi
+    # Build cost compute image
+    cd lambda_handlers
+    docker build --platform linux/amd64 -t ${account_id}.dkr.ecr."$region".amazonaws.com/flotorch-costcompute-"$suffix":latest -f cost_handler/Dockerfile --push .
+    cd ..
 
     echo "Docker images updated successfully"
 }
