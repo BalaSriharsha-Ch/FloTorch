@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Lambda Function Template for Flotorch'
+Description: 'Lambda Function Template for Flotorch with Resource-Based Policies'
 
 Parameters:
   TableSuffix:
@@ -22,6 +22,10 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID where Lambda functions will be deployed
+  VpcCidr:
+    Type: String
+    Default: "10.0.0.0/16"
+    Description: "CIDR block of the VPC"
   PrivateSubnets:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Private subnet IDs for Lambda functions
@@ -130,6 +134,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
         - arn:aws:iam::aws:policy/AmazonOpenSearchServiceFullAccess
         - arn:aws:iam::aws:policy/AmazonOpenSearchIngestionFullAccess
         - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
@@ -146,24 +151,21 @@ Resources:
                   - ec2:DeleteNetworkInterface
                   - ec2:AssignPrivateIpAddresses
                   - ec2:UnassignPrivateIpAddresses
-                Resource: '*'
-        - PolicyName: LambdaDynamoDBPolicy
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${LambdaSecurityGroup}
+        - PolicyName: OpenSearchAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - dynamodb:*
-                Resource:
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExecutionTableName}
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExperimentTableName}
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MetricsTableName}
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ModelInvocationsTableName}
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExecutionTableName}/index/*
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExperimentTableName}/index/*
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MetricsTableName}/index/*
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ModelInvocationsTableName}/index/*
-        - PolicyName: DynamoDBAccess
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - es:ESHttpDelete
+                Resource: !Sub arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${OpenSearchEndpoint}/*
+        - PolicyName: LambdaDynamoDBPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -178,6 +180,56 @@ Resources:
                 Resource:
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExecutionTableName}
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExperimentTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MetricsTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ModelInvocationsTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExecutionTableName}/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExperimentTableName}/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MetricsTableName}/index/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ModelInvocationsTableName}/index/*
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucketName}
+                  - !Sub arn:aws:s3:::${DataBucketName}/*
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: 
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/flotorch-*
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 instance running Docker operations
+      GroupName: !Sub DockerPullPush-${TableSuffix}
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0  # For SSM connectivity
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
 
   DockerPullPushRole:
     Type: AWS::IAM::Role
@@ -192,6 +244,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
       Policies:
         - PolicyName: EC2AndSSMAccess
           PolicyDocument:
@@ -199,14 +252,50 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - ec2:RunInstances
                   - ec2:DescribeInstances
-                  - ec2:TerminateInstances
-                  - ec2:CreateTags
-                  - iam:PassRole
-                  - ssm:SendCommand
-                  - ssm:GetCommandInvocation
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSecurityGroups
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                Resource: 
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                  - !Sub arn:aws:ec2:${AWS::Region}::image/*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:*/*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt EC2InstanceRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:CreateRepository
+                  - ecr:DescribeRepositories
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                Resource: 
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/flotorch-*
+                  - 'arn:aws:ecr:us-east-1:709825985650:repository/fission-labs/*'
 
   EC2InstanceRole:
     Type: AWS::IAM::Role
@@ -227,13 +316,27 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - ecr:*
+                  - ecr:GetAuthorizationToken
+                  - ecr:CreateRepository
+                  - ecr:DescribeRepositories
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: 
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/flotorch-*
+                  - 'arn:aws:ecr:us-east-1:709825985650:repository/fission-labs/*'
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Path: /
+      Path: "/"
       Roles:
         - !Ref EC2InstanceRole
 
@@ -279,6 +382,7 @@ Resources:
                           MinCount=1,
                           MaxCount=1,
                           SubnetId=event['ResourceProperties']['PublicSubnet1'],
+                          SecurityGroupIds=[event['ResourceProperties']['SecurityGroupId']],
                           BlockDeviceMappings=[{
                               'DeviceName': '/dev/xvda',
                               'Ebs': {
@@ -519,6 +623,7 @@ Resources:
       ServiceToken: !GetAtt DockerPullPushFunction.Arn
       TableSuffix: !Ref TableSuffix
       InstanceProfileArn: !GetAtt EC2InstanceProfile.Arn
+      SecurityGroupId: !Ref EC2SecurityGroup
       IndexingRepositoryUri: !Ref IndexingRepositoryUri
       RetrieverRepositoryUri: !Ref RetrieverRepositoryUri
       AppRepositoryUri: !Ref AppRepositoryUri
@@ -663,21 +768,33 @@ Outputs:
     Description: ARN of the Runtime Lambda function
     Condition: PrerequisitesMet
     Value: !GetAtt RuntimeLambdaFunctionWithPrereqs.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-RuntimeLambdaArnWithPrereqs
   CostComputeLambdaArnWithPrereqs:
     Description: ARN of the cost compute lambda function
     Condition: PrerequisitesMet
     Value: !GetAtt CostComputeLambdaFunctionWithPrereqs.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-CostComputeLambdaArnWithPrereqs
   RuntimeLambdaArnNoPrereqs:
     Description: ARN of the Runtime Lambda function
     Condition: PrerequisitesNotMet
     Value: !GetAtt RuntimeLambdaFunctionNoPrereqs.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-RuntimeLambdaArnNoPrereqs
   CostComputeLambdaArnNoPrereqs:
     Description: ARN of the cost compute lambda function
     Condition: PrerequisitesNotMet
     Value: !GetAtt CostComputeLambdaFunctionNoPrereqs.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-CostComputeLambdaArnNoPrereqs
   LambdaRoleArn:
     Description: ARN of the Lambda execution role
     Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-LambdaRoleArn
   LambdaSecurityGroupId:
     Description: ID of the Lambda security group
     Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-LambdaSecurityGroupId
